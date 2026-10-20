@@ -62,7 +62,7 @@ tr:hover td{background:rgba(245,184,0,.08)}
 .login{max-width:410px;margin:9vh auto;padding:0 16px;animation:pop .4s}.login h1{font-size:40px;font-weight:800;margin:0}.login h1 span{background:linear-gradient(90deg,var(--yd),var(--y));-webkit-background-clip:text;background-clip:text;color:transparent}
 .login .card{padding:24px;border-radius:24px}.lg{display:block;width:90px;height:auto;margin:8px 0 12px}nav .lgn{display:block;width:72px;height:auto;margin:0 10px 16px}.err{color:var(--er);font-size:13px;margin-top:6px}.mut{color:var(--mut)}
 @media(max-width:820px){.app{flex-direction:column}nav{width:100%;height:auto;flex-direction:row;overflow-x:auto;padding:10px;position:sticky;top:0;z-index:5;gap:4px}nav h1,nav .lgn{display:none}nav button{white-space:nowrap;min-height:42px;padding:8px 13px}nav button:hover:not(.on){transform:none}.pos{grid-template-columns:1fr}#cart{position:static}main{padding:14px}.top h2{font-size:22px}}
-@media print{nav,.top,.noprint{display:none!important}.ov{position:static;background:none}}
+@media print{nav,.top,.noprint{display:none!important}.ov{position:static;background:none}.sc{max-height:none!important;overflow:visible!important}main{max-width:none}}
 </style>
 </head><body><div id="root"></div><div id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
@@ -77,7 +77,7 @@ let D=emptyD(),sb=null,syncT=null,loading=false;
 const save=()=>{};
 const demoWarn=()=>'';
 const mapSale=s=>({id:s.id,t:+new Date(s.t),l:s.loc_id,u:s.user_name,items:s.items,gross:+s.gross,disc:+s.disc,net:+s.net,pm:s.pm,cash:+s.cash,hpp:+s.hpp,use:s.use,note:s.note||'',status:s.status});
-async function rpc(n,a){const{data,error}=await sb.rpc(n,a||{});if(error)throw error;return data}
+async function rpc(n,a){const{data,error}=await sb.rpc(n,a||{});if(error){const x=new Error(error.message+(error.code&&/^(42|P0|28)/.test(String(error.code))&&!/^P0001$/.test(error.code)?' ['+error.code+']':''));x.code=error.code;throw x}return data}
 async function wr(p){const{data,error}=await p;if(error)throw error;return data}
 const aud=(a,o,r)=>{try{Promise.resolve(sb.rpc('log_audit',{a,o:String(o==null?'':o),r:r?String(r):''})).catch(()=>{})}catch(e){}};
 const idErr=m=>{m=String(m||'');if(/already registered|already exists/i.test(m))return 'Email sudah terdaftar.';if(/at least 6|Password should/i.test(m))return 'Kata sandi minimal 6 karakter.';if(/rate limit/i.test(m))return 'Terlalu banyak percobaan. Coba lagi beberapa menit lagi.';if(/not confirmed/i.test(m))return 'Email belum dikonfirmasi. Matikan "Confirm email" di Supabase (Authentication > Sign In / Providers > Email).';if(/invalid.*email|email.*invalid/i.test(m))return 'Alamat email tidak diterima. Gunakan email yang valid.';return m};
@@ -224,13 +224,22 @@ const lchk=(s=[])=>D.loc.map(l=>`<label style="display:inline-flex;gap:6px;align
 function usersH(){return `<div class="card"><b>Cabang</b><div class="f"><div><label for="ln">Nama cabang baru</label><input id="ln"></div><button class="btn" onclick="addLoc()">Tambah cabang</button></div><div id="lerr" class="err"></div><table>${D.loc.map(l=>`<tr><td>${esc(l.n)}</td><td><button class="btn g s" onclick="renLoc('${l.id}')">Ubah nama</button> ${D.loc.length>1?`<button class="btn r s" onclick="delLoc('${l.id}')">Hapus</button>`:''}</td></tr>`).join('')}</table></div>
 <div class="card sc"><b>Akun pengguna</b><p class="mut">Login memakai email. Kalau staf tidak punya email, gunakan satu email Anda dengan tambahan nama, misalnya abuiqbal+kasir1@gmail.com. Semua tetap masuk ke kotak masuk yang sama.</p><div class="f"><div><label for="an">Nama</label><input id="an"></div><div><label for="au">Email</label><input id="au" type="email" autocomplete="off"></div><div><label for="ap">Kata sandi (min. 6)</label><input id="ap" type="password" autocomplete="new-password"></div><div><label for="ar">Peran</label><select id="ar"><option value="staff">Staff / Kasir</option><option value="owner">Owner</option></select></div></div><p id="lcf"><label>Cabang yang boleh diakses (untuk staff)</label>${lchk()}</p><button class="btn" onclick="addUser()">Tambah akun</button><div id="aerr" class="err"></div>
 <table style="margin-top:12px"><tr><th>Nama</th><th>Email</th><th>Peran</th><th>Cabang</th><th></th></tr>${D.users.map(x=>`<tr><td>${esc(x.n)}</td><td>${esc(x.u)}</td><td>${x.role=='owner'?'Owner':'Staff'}</td><td>${x.role=='owner'?'Semua':x.locs.map(l=>esc(lname(l))).join(', ')||'<span class="badge v">Belum ada</span>'}</td><td>${x.role=='staff'?`<button class="btn g s" onclick="editLocs('${x.id}')">Atur cabang</button> `:''}<button class="btn g s" onclick="resetPw('${x.id}')">Reset sandi</button>${x.id!=U.id?` <button class="btn r s" onclick="delUser('${x.id}')">Hapus</button>`:''}</td></tr>`).join('')}</table></div>`}
+async function signUpRaw(email,password){
+  const r=await fetch(SB_URL+'/auth/v1/signup',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)return{error:{message:j.msg||j.message||j.error_description||j.error||('Gagal membuat akun (kode '+r.status+')')}};
+  return{error:null}}
 async function addUser(){const e=m=>{$('#aerr').textContent=m},n=V('an').trim(),u=V('au').trim().toLowerCase(),p=V('ap'),r=V('ar'),l=sel('#lcf');
   if(!n||!u)return e('Nama dan email wajib diisi.');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u))return e('Format email tidak valid.');if(p.length<6)return e('Kata sandi minimal 6 karakter.');if(r=='staff'&&!l.length)return e('Pilih minimal satu cabang untuk staf.');
   e('Memproses…');
-  try{const tmp=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storageKey:'abuiqbal-tmp'}});
-    const{data,error}=await tmp.auth.signUp({email:u,password:p});if(error)return e(idErr(error.message));
-    if(!data.user||(data.user.identities&&data.user.identities.length===0))return e('Email sudah terdaftar atau akun tidak dapat dibuat.');
-    await rpc('create_profile',{p_id:data.user.id,p_name:n,p_role:r,p_locs:r=='staff'?l:[]});await sync();toast('Akun ditambahkan')}
+  try{
+    const s=await signUpRaw(u,p);
+    if(s.error&&!/already registered|already exists/i.test(s.error.message))return e('Langkah 1 (membuat akun login) gagal: '+idErr(s.error.message));
+    try{await rpc('create_profile_by_email',{p_email:u,p_password:p,p_name:n,p_role:r,p_locs:r=='staff'?l:[]})}
+    catch(x){return e('Langkah 2 (mendaftarkan peran) gagal: '+x.message)}
+    $('#aerr').textContent='';
+    try{await sync()}catch(x){toast('Akun dibuat, tetapi data gagal dimuat ulang. Muat ulang halaman.',0);return}
+    toast('Akun ditambahkan')}
   catch(x){e(x.message)}}
 function editLocs(id){const x=D.users.find(z=>z.id==id);modal(`<h3>Cabang untuk ${esc(x.n)}</h3><p>${lchk(x.locs)}</p><div id="me" class="err"></div><button class="btn" onclick="saveLocs('${id}')">Simpan</button> <button class="btn g" onclick="closeM()">Batal</button>`)}
 async function saveLocs(id){const l=sel('#mo');if(!l.length)return $('#me').textContent='Pilih minimal satu cabang.';
@@ -275,11 +284,11 @@ function fm(e){const d=e.value.replace(/\D/g,'');e.value=d?nf(+d):''}
 
 
 
-const NAV=[['dash','Dashboard',1],['pos','Kasir'],['prod','Produk'],['inp','Input Barang',1],['inv','Inventori'],['tr','Transfer',1],['exp','Pengeluaran'],['rep','Laporan',1],['set','Pengaturan',1]];
+const NAV=[['dash','Dashboard',1],['pos','Kasir'],['prod','Produk'],['inp','Input Barang',1],['inv','Inventori'],['stk','Stok Terakhir'],['tr','Transfer',1],['exp','Pengeluaran'],['rep','Laporan',1],['set','Pengaturan',1]];
 
 const go=p=>{pg=p;shell()};
 function lsel(all){return `<select aria-label="Lokasi" style="width:auto" onchange="${all?"R.l=this.value":"loc=this.value"};render()">${all?`<option value="all">Semua lokasi</option>`:''}${(all?D.loc:myLocs()).map(l=>`<option value="${l.id}" ${(all?R.l:loc)==l.id?'selected':''}>${l.n}</option>`).join('')}</select>`}
-function render(){const t=NAV.find(n=>n[0]==pg)[1];$('#pg').innerHTML=`<div class="top"><h2>${t}</h2>${pg=='rep'?'':lsel(pg=='dash'&&0)}</div>`+({dash,pos,prod,inp,inv,tr,exp,rep,set})[pg]();save()}
+function render(){const t=NAV.find(n=>n[0]==pg)[1];$('#pg').innerHTML=`<div class="top"><h2>${t}</h2>${pg=='rep'||pg=='stk'?'':lsel(pg=='dash'&&0)}</div>`+({dash,pos,prod,inp,inv,stk,tr,exp,rep,set})[pg]();if(pg=='stk')stkTable();save()}
 
 /* ---------- Kalkulasi ---------- */
 const ok=s=>s.status=='Selesai';
@@ -399,6 +408,25 @@ function askDelProd(id){const p=D.prod.find(x=>x.id==id);modal(`<h3>Hapus produk
 
 
 
+
+/* ===== STOK TERAKHIR ===== */
+let ST={q:'',l:'all',s:'all'};
+const stkRel=(i,l)=>D.prod.some(p=>p.b==i.id&&p.locs.includes(l))||((D.bal[l]||{})[i.id]!=null);
+function stkLocs(){if(ST.l!='all'&&!D.loc.some(l=>l.id==ST.l))ST.l='all';return ST.l=='all'?D.loc:D.loc.filter(l=>l.id==ST.l)}
+function stkRows(){const ls=stkLocs();
+  return D.ing.filter(i=>i.n.toLowerCase().includes(ST.q.toLowerCase())).map(i=>{
+    const cells=ls.map(l=>stkRel(i,l.id)?{l:l.id,q:bal(l.id,i.id)}:{l:l.id,q:null}),rc=cells.filter(c=>c.q!=null),tot=rc.reduce((a,c)=>a+c.q,0);
+    const st=!rc.length?'-':rc.every(c=>c.q<=0)?'Habis':rc.some(c=>c.q<=i.min)?'Menipis':'Aman';
+    return{i,cells,tot,st,val:tot*i.c}
+  }).filter(r=>ST.s=='all'||(ST.s=='low'&&(r.st=='Menipis'||r.st=='Habis'))||(ST.s=='out'&&r.st=='Habis')||(ST.s=='ok'&&r.st=='Aman'))}
+function stkTable(){const ls=stkLocs(),rows=stkRows(),own=owner(),cnt=s=>rows.filter(r=>r.st==s).length;
+  $('#sts').innerHTML=`<div class="m"><small>Jenis barang</small><b>${rows.length}</b></div><div class="m"><small>Menipis</small><b>${cnt('Menipis')}</b></div><div class="m"><small>Habis</small><b>${cnt('Habis')}</b></div>${own?`<div class="m"><small>Nilai stok (harga modal)</small><b>${rp(rows.reduce((a,r)=>a+r.val,0))}</b></div>`:''}`;
+  $('#stt').innerHTML=`<table><tr><th>Barang</th><th>Satuan</th>${ls.map(l=>`<th>${esc(l.n)}</th>`).join('')}${ls.length>1?'<th>Total</th>':''}<th>Minimum</th><th>Status</th>${own?'<th>Harga modal</th><th>Nilai stok</th>':''}</tr>${rows.map(r=>`<tr><td>${esc(r.i.n)}</td><td>${r.i.u}</td>${r.cells.map(c=>`<td style="${c.q!=null&&c.q<=r.i.min?'color:var(--er);font-weight:700':''}">${c.q==null?'–':nq(c.q)}</td>`).join('')}${ls.length>1?`<td><b>${nq(r.tot)}</b></td>`:''}<td>${nq(r.i.min)}</td><td><span class="badge ${r.st=='Aman'?'o':r.st=='-'?'n':'v'}">${r.st=='-'?'Tidak dijual':r.st}</span></td>${own?`<td>${rp(r.i.c)}</td><td>${rp(r.val)}</td>`:''}</tr>`).join('')||'<tr><td colspan="9" class="mut">Tidak ada data.</td></tr>'}</table>`}
+function stk(){stkLocs();return `<div class="card noprint"><div class="f"><div><label for="sq1">Cari barang</label><input id="sq1" value="${esc(ST.q)}" oninput="ST.q=this.value;stkTable()" placeholder="Ketik nama barang"></div><div><label for="sl1">Cabang</label><select id="sl1" onchange="ST.l=this.value;stkTable()"><option value="all">Semua cabang</option>${D.loc.map(l=>`<option value="${l.id}" ${ST.l==l.id?'selected':''}>${esc(l.n)}</option>`).join('')}</select></div><div><label for="ss1">Status</label><select id="ss1" onchange="ST.s=this.value;stkTable()"><option value="all">Semua</option><option value="low" ${ST.s=='low'?'selected':''}>Menipis dan habis</option><option value="out" ${ST.s=='out'?'selected':''}>Habis</option><option value="ok" ${ST.s=='ok'?'selected':''}>Aman</option></select></div><button class="btn g" onclick="sync().then(()=>toast('Data diperbarui'))">Muat ulang</button><button class="btn g" onclick="stkCsv()">Ekspor CSV</button><button class="btn" onclick="print()">Cetak</button></div></div><p class="mut">Stok terakhir per ${dt(Date.now())}. Angka merah berarti stok sudah di batas minimum atau kurang. Tanda – berarti barang tidak dijual di cabang itu.</p><div class="grid" id="sts"></div><div class="card sc" id="stt"></div>`}
+function stkCsv(){const ls=stkLocs(),rows=stkRows(),own=owner();
+  const h=['Barang','Satuan',...ls.map(l=>l.n),...(ls.length>1?['Total']:[]),'Minimum','Status',...(own?['Harga modal','Nilai stok']:[])];
+  const r=[h,...rows.map(x=>[x.i.n,x.i.u,...x.cells.map(c=>c.q==null?'':c.q),...(ls.length>1?[x.tot]:[]),x.i.min,x.st=='-'?'Tidak dijual':x.st,...(own?[x.i.c,x.val]:[])])];
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent('\ufeff'+r.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n'));a.download='stok-terakhir-'+ld()+'.csv';a.click()}
 
 boot();
 </script></body></html>
