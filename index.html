@@ -85,8 +85,9 @@ const idErr=m=>{m=String(m||'');if(/already registered|already exists/i.test(m))
 function fail(id,e){const m=(e&&e.message)||String(e),el=id&&$('#'+id);if(el)el.textContent=m;else toast(m,0)}
 
 
-function startSync(){stopSync();syncT=setInterval(quiet,20000);document.addEventListener('visibilitychange',onVis)}
-function stopSync(){clearInterval(syncT);document.removeEventListener('visibilitychange',onVis)}
+function startSync(){stopSync();syncT=setInterval(quiet,30000);document.addEventListener('visibilitychange',onVis);['pointerdown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,onAct,{passive:true}))}
+function stopSync(){clearInterval(syncT);document.removeEventListener('visibilitychange',onVis);['pointerdown','keydown','touchstart'].forEach(ev=>document.removeEventListener(ev,onAct))}
+function onAct(){const was=Date.now()-idleSince>10*60*1000;idleSince=Date.now();if(was)quiet()}
 function onVis(){if(!document.hidden)quiet()}
 
 
@@ -98,15 +99,7 @@ async function boot(){
   try{const{data}=await sb.auth.getSession();if(data&&data.session){await enter(data.session);return}}catch(e){}
   login();
 }
-async function enter(session){
-  await loadAll();
-  const p=D.users.find(x=>x.id===session.user.id);
-  if(!p){try{await sb.auth.signOut()}catch(e){}D=emptyD();throw new Error('Akun ini belum didaftarkan oleh owner. Hubungi owner.')}
-  U={id:p.id,u:p.u,n:p.n,role:p.role,locs:p.locs};
-  const ls=myLocs();
-  if(!ls.length){try{await sb.auth.signOut()}catch(e){}U=null;D=emptyD();throw new Error('Akun belum ditugaskan ke cabang mana pun. Hubungi owner.')}
-  loc=ls[0].id;pg=owner()?'dash':'pos';shell();startSync();
-}
+
 async function login(){
   stopSync();U=null;
   $('#root').innerHTML=`<div class="login"><h1>Abu <span>Iqbal</span></h1>${LOGO}<p class="mut">Welcome</p><div class="card"><label for="lu">Email</label><input id="lu" type="email" autocomplete="username"><br><br><label for="lp">Kata sandi</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key=='Enter')doLogin()"><div class="err" id="le"></div><br><button class="btn" style="width:100%" onclick="doLogin()">Masuk</button></div></div>`;
@@ -124,7 +117,7 @@ async function doLogin(){const e=V('lu').trim().toLowerCase(),p=V('lp'),m=t=>{$(
   if(!e||!p)return m('Isi email dan kata sandi.');m('Memeriksa…');
   try{const{data,error}=await sb.auth.signInWithPassword({email:e,password:p});if(error){m(/not confirmed/i.test(error.message)?idErr(error.message):'Email atau kata sandi salah.');return}
     await enter(data.session)}catch(x){m(x.message||'Gagal masuk.')}}
-async function logout(){stopSync();try{await sb.auth.signOut()}catch(e){}U=null;D=emptyD();cart=[];login()}
+async function logout(){stopSync();phMissing=false;phVer=null;usersAt=0;lastVer=null;try{await sb.auth.signOut()}catch(e){}U=null;D=emptyD();cart=[];login()}
 function shell(){$('#root').innerHTML=`<div class="app"><nav><h1>Abu <span>Iqbal</span></h1>${LOGO.replace('class="lg"','class="lgn"')}${NAV.filter(n=>!n[2]||owner()).map(n=>`<button class="${pg==n[0]?'on':''}" onclick="navTo('${n[0]}')">${n[1]}</button>`).join('')}<button style="margin-top:auto" onclick="logout()">Keluar (${esc(U.n)})</button></nav><main id="pg"></main></div>`;render()}
 
 /* ===== KASIR & KAS TOKO ===== */
@@ -141,7 +134,7 @@ async function pay(){if(busy)return;const m=V('pm'),keys=Object.keys(usage()),us
   if(m=='Tunai'&&N('cash')<sub()-dv())return $('#ce').textContent='Uang diterima kurang dari total.';
   busy=1;
   try{const s=await rpc('create_sale',{p_loc:loc,p_lines:cart.map(c=>({pid:c.pid,ml:c.ml||0,q:c.q})),p_disc_type:disc.t,p_disc_val:disc.v,p_pm:m,p_cash:m=='Tunai'?N('cash'):0,p_use:us,p_note:V('nt').trim()});
-    cart=[];disc.v=0;closeM();await loadAll(['stock','hist'],[loc]);render();receipt(mapSale(s));toast('Transaksi berhasil')}
+    cart=[];disc.v=0;closeM();await loadMark(['stock','hist'],[loc]);render();receipt(mapSale(s));toast('Transaksi berhasil')}
   catch(e){fail('ce',e)}finally{busy=0}}
 async function doVoid(id){const r=V('vr').trim();if(!r)return $('#ve').textContent='Alasan wajib diisi.';
   try{await rpc('void_sale',{p_id:id,p_reason:r});closeM();await sync();toast('Transaksi di-void')}catch(e){fail('ve',e)}}
@@ -376,54 +369,22 @@ let loadP=Promise.resolve(),pending=0;
 async function fetchAll(t,ord,filt){
   const P=1000;
   const mk=c=>{let r=sb.from(t).select('*',c?{count:'exact'}:undefined);if(filt)r=filt(r);for(const o of ord)r=r.order(o[0],o[1]?{ascending:o[1]=='asc'}:undefined);return r};
-  const f=await mk(true).range(0,P-1);if(f.error)throw f.error;
-  let rows=f.data||[];const total=f.count==null?rows.length:f.count;
-  if(total>P){const jobs=[];for(let s=P;s<total;s+=P)jobs.push(mk(false).range(s,s+P-1));const rs=await Promise.all(jobs);for(const r of rs){if(r.error)throw r.error;rows=rows.concat(r.data||[])}}
+  const f=await mk(false).range(0,P-1);if(f.error)throw f.error;
+  let rows=f.data||[];if(rows.length<P)return rows;
+  const g=await mk(true).range(P,2*P-1);if(g.error)throw g.error;
+  rows=rows.concat(g.data||[]);const total=g.count==null?rows.length:g.count;
+  if(total>2*P){const jobs=[];for(let st=2*P;st<total;st+=P)jobs.push(mk(false).range(st,st+P-1));const rs=await Promise.all(jobs);for(const r of rs){if(r.error)throw r.error;rows=rows.concat(r.data||[])}}
   return rows}
 function reindex(){D.imap={};D.ing.forEach(i=>{D.imap[i.id]=i});D.rel=new Set();D.prod.forEach(p=>{p.key=(p.n+' '+p.cat).toLowerCase();p.locs.forEach(l=>D.rel.add(l+'|'+p.b))})}
 function loadAll(parts,sl){pending++;const p=loadP.then(()=>doLoad(parts,sl));loadP=p.catch(()=>{});return p.finally(()=>{pending--})}
-async function doLoad(parts,sl){
-  const all=!parts||parts==='all',has=x=>all||parts.includes(x),N={},jobs=[];
-  const lim=async(t,col,n)=>{const r=await sb.from(t).select('*').order(col,{ascending:false}).limit(n);if(r.error)throw r.error;return r.data||[]};
-  const limSafe=async(t,col,n)=>{try{return await lim(t,col,n)}catch(e){return []}};
-  if(has('core'))jobs.push((async()=>{
-    const[lo,se,pf,sh]=await Promise.all([fetchAll('locations',[['created_at']]),fetchAll('settings',[]),fetchAll('profiles',[['name'],['id']]),lim('shifts','opened_at',500)]);
-    N.loc=lo.map(l=>({id:l.id,n:l.name}));
-    N.set=se[0]?{lim:+se[0].disc_limit,neg:se[0].allow_negative?1:0}:D.set;
-    N.users=pf.map(p=>({id:p.id,u:p.email,n:p.name,role:p.role,locs:p.locs||[]}));
-    N.shifts=sh.map(s=>({id:s.id,l:s.loc_id,o:+new Date(s.opened_at),a:+s.opening_cash,u:s.opened_by,c:s.closed_at?+new Date(s.closed_at):null,f:s.counted==null?null:+s.counted,e:s.expected==null?null:+s.expected,sl:s.sales_cash==null?null:+s.sales_cash,x:s.expenses==null?null:+s.expenses,n:s.note||''}))})());
-  if(has('catalog'))jobs.push((async()=>{
-    const[it,co,pr]=await Promise.all([fetchAll('items',[['name'],['id']]),fetchAll('item_costs',[['item_id']]),fetchAll('products',[['name'],['id']])]);
-    const cost={};co.forEach(c=>{cost[c.item_id]=+c.cost});
-    N.ing=it.map(i=>({id:i.id,n:i.name,u:i.unit,min:+i.min,c:cost[i.id]||0}));
-    N.prod=pr.map(p=>({id:p.id,n:p.name,cat:p.cat,b:p.item_id,on:p.active?1:0,u:p.unit,ppm:+p.price,locs:p.locs||[]}))})());
-  if(has('stock'))jobs.push((async()=>{
-    if(Array.isArray(sl)){const part={};for(const l of sl){const rows=await fetchAll('stock',[['item_id']],r=>r.eq('loc_id',l));const m={};rows.forEach(s=>{m[s.item_id]=+s.qty});part[l]=m}N.balPart=part}
-    else{const rows=await fetchAll('stock',[['loc_id'],['item_id']]),b={};rows.forEach(s=>{(b[s.loc_id]=b[s.loc_id]||{})[s.item_id]=+s.qty});N.bal=b}})());
-  if(has('hist'))jobs.push((async()=>{
-    const[mo,sa,tr,ex,au,ph]=await Promise.all([lim('movements','t',1000),lim('sales','t',1000),lim('transfers','t',300),lim('expenses','t',1000),lim('audit','t',100),limSafe('price_history','t',300)]);
-    N.mv=mo.map(m=>({t:+new Date(m.t),l:m.loc_id,i:m.item_id,q:+m.qty,type:m.type,reason:m.reason||'',u:m.user_name,ref:m.ref||''}));
-    N.sales=sa.map(mapSale);
-    N.tr=tr.map(t=>({id:t.id,t:+new Date(t.t),f:t.from_loc,to:t.to_loc,i:t.item_id,q:+t.qty,st:t.status}));
-    N.exp=ex.map(e=>({t:+new Date(e.t),d:e.d,l:e.loc_id,c:e.cat,a:+e.amount,n:e.note,u:e.user_name}));
-    N.aud=au.map(a=>({t:+new Date(a.t),u:a.user_name,a:a.action,o:a.object||'',r:a.reason||''}));
-    N.ph=ph.map(h=>({t:+new Date(h.t),pid:h.product_id,n:h.product_name,k:h.kind,o:+h.old_value,nw:+h.new_value,u:h.user_name,note:h.note||''}))})());
-  await Promise.all(jobs);
-  if(N.loc){D.loc=N.loc;D.set=N.set;D.users=N.users;D.shifts=N.shifts}
-  if(N.ing){D.ing=N.ing;D.prod=N.prod;reindex()}
-  if(N.bal)D.bal=N.bal;
-  if(N.balPart)Object.assign(D.bal,N.balPart);
-  if(N.mv){D.mv=N.mv;D.sales=N.sales;D.tr=N.tr;D.exp=N.exp;D.aud=N.aud;D.ph=N.ph}
-  if(U&&D.loc.length&&!D.loc.some(l=>l.id==loc)){const ls=myLocs();if(ls.length)loc=ls[0].id}
-}
-const dsig=()=>{try{return JSON.stringify([D.bal,D.sales.length,D.sales.filter(x=>x.status!='Selesai').length,D.sales[0]&&D.sales[0].id,D.mv.length,D.mv[0]&&D.mv[0].t,D.tr,D.exp.length,D.shifts,D.aud.length,D.ph.length,D.set,D.users,D.loc,D.prod.map(p=>p.id+p.on+'|'+p.ppm+'|'+p.locs.join('.')).join(),D.ing.map(i=>i.id+i.c+'|'+i.min).join()])}catch(e){return String(Math.random())}};
+
+const dsig=()=>{try{return JSON.stringify([D.bal,D.sales.length,D.sales.filter(x=>x.status!='Selesai').length,D.sales[0]&&D.sales[0].id,D.mv.length,D.mv[0]&&D.mv[0].t,D.tr,D.exp.length,D.shifts,D.aud.length,D.set,D.users,D.loc,D.prod.map(p=>p.id+p.on+'|'+p.ppm+'|'+p.locs.join('.')).join(),D.ing.map(i=>i.id+i.c+'|'+i.min).join()])}catch(e){return String(Math.random())}};
 function renderKeep(){const y=window.scrollY||0,boxes=[...document.querySelectorAll('#pg .sc')].map(e=>[e.scrollTop,e.scrollLeft]);render();document.querySelectorAll('#pg .sc').forEach((e,i)=>{if(boxes[i]){e.scrollTop=boxes[i][0];e.scrollLeft=boxes[i][1]}});try{window.scrollTo(0,y)}catch(e){}}
-async function sync(parts,sl){await loadAll(parts,sl);renderKeep()}
-async function quiet(){if(!U||pending>0||document.hidden)return;tick++;const full=tick%5==0,s0=dsig();
-  try{await loadAll(full?'all':['core','hist','stock'],full?null:[loc])}catch(e){if(/JWT|token|auth/i.test((e&&e.message)||''))logout();return}
-  if(dsig()===s0)return;
-  const a=document.activeElement,typing=a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName);
-  if(U&&!$('#mo')&&!typing&&['dash','brg','stok','rep'].includes(pg))renderKeep()}
+let lastVer=null,verMissing=false,idleSince=Date.now();
+
+
+async function sync(parts,sl){await loadMark(parts,sl);renderKeep()}
+
 const stkRel=(i,l)=>D.rel.has(l+'|'+i.id)||((D.bal[l]||{})[i.id]!=null);
 
 /* ===== TAMPILAN UNTUK RIBUAN BARANG ===== */
@@ -505,7 +466,7 @@ PN.ph=0;let PHQ='';
 const pctV=(o,n)=>o>0?(n-o)/o*100:null;
 const pctS=x=>x==null?'-':(x>0?'+':'')+nq(+x.toFixed(1))+'%';
 const mgV=(j,m)=>j>0?(j-m)/j*100:0;
-function editPrice(id){const p=D.prod.find(x=>x.id==id),c=ing(p.b).c,hist=D.ph.filter(h=>h.pid==id).slice(0,5);
+function editPrice(id){const p=D.prod.find(x=>x.id==id),c=ing(p.b).c;
   modal(`<h3>Ubah harga — ${esc(p.n)}</h3><p class="mut">Berlaku untuk semua cabang. Transaksi lama tidak berubah.</p>
 <div class="f" style="grid-template-columns:1fr 1fr"><div><label>Harga jual sekarang</label><b>${rp(p.ppm)} / ${unit(p)}</b></div><div><label>Harga modal sekarang</label><b>${rp(c)} / ${unit(p)}</b></div>
 <div><label for="npj">Harga jual baru (Rp / ${unit(p)})</label><input id="npj" class="rp" type="text" inputmode="numeric" value="${nf(p.ppm)}" oninput="fm(this);prvPrice('${id}')"></div>
@@ -513,7 +474,7 @@ function editPrice(id){const p=D.prod.find(x=>x.id==id),c=ing(p.b).c,hist=D.ph.f
 <p id="prv" class="mut" style="margin:8px 0">Belum ada perubahan. Margin: ${nq(+mgV(p.ppm,c).toFixed(1))}%</p>
 <label for="npn">Catatan (opsional)</label><input id="npn" placeholder="mis. supplier naik harga">
 <div id="npe" class="err"></div><br><button class="btn" onclick="savePrice('${id}')">Simpan harga baru</button> <button class="btn g" onclick="closeM()">Batal</button>
-${hist.length?`<hr style="border:0;border-top:1px solid var(--ln);margin:16px 0"><b>Riwayat harga barang ini</b><table style="margin-top:6px">${hist.map(h=>`<tr><td>${dt(h.t)}</td><td>${h.k}</td><td>${rp(h.o)} → ${rp(h.nw)}</td></tr>`).join('')}</table>`:''}`)}
+<div id="phm" data-pid="${id}">${phModalH(id)}</div>`);phEnsure()}
 function prvPrice(id){const p=D.prod.find(x=>x.id==id),c=ing(p.b).c,j=N('npj'),m=N('npm'),L=[];
   if(j!==p.ppm)L.push(`Harga jual ${j>p.ppm?'naik':'turun'} ${pctS(pctV(p.ppm,j))} (${j>p.ppm?'+':'−'}${rp(Math.abs(j-p.ppm))})`);
   if(m!==c)L.push(`Harga modal ${m>c?'naik':'turun'} ${pctS(pctV(c,m))} (${m>c?'+':'−'}${rp(Math.abs(m-c))})`);
@@ -524,18 +485,17 @@ async function savePrice(id){const p=D.prod.find(x=>x.id==id),c=ing(p.b).c,j=N('
   if(j===p.ppm&&m===c)return e('Belum ada perubahan harga.');
   const note=V('npn').trim();let withHist=true;
   try{
-    try{await rpc('set_prices',{p_product:id,p_price:j,p_cost:m,p_note:note})}
+    try{if(spMissing)throw Object.assign(new Error('PGRST202 set_prices'),{code:'PGRST202'});await rpc('set_prices',{p_product:id,p_price:j,p_cost:m,p_note:note})}
     catch(x){
-      if(/could not find the function|schema cache|does not exist|PGRST202/i.test((x.message||'')+(x.code||''))){withHist=false;
+      if(/could not find the function|schema cache|does not exist|PGRST202/i.test((x.message||'')+(x.code||''))){withHist=false;spMissing=true;
         if(j!==p.ppm)await wr(sb.from('products').update({price:j}).eq('id',id));
         if(m!==c)await wr(sb.from('item_costs').update({cost:m}).eq('item_id',p.b));
         aud('Ubah harga',p.n+' (jual '+rp(p.ppm)+' → '+rp(j)+'; modal '+rp(c)+' → '+rp(m)+')',note||'semua cabang')}
       else throw x}
-    closeM();await sync(['catalog','hist']);
+    phVer=null;closeM();await sync(['catalog']);
     toast(withHist?'Harga diperbarui di semua cabang':'Harga diperbarui. Riwayat harga belum aktif (jalankan patch SQL harga).')}
   catch(x){e(x.message)}}
-function phTblH(){const qq=PHQ.toLowerCase(),rows=D.ph.filter(h=>!qq||h.n.toLowerCase().includes(qq)),SZ=20,pages=Math.max(1,Math.ceil(rows.length/SZ));if(PN.ph>=pages)PN.ph=pages-1;if(PN.ph<0)PN.ph=0;const sl=rows.slice(PN.ph*SZ,PN.ph*SZ+SZ);
-  return `<table><tr><th>Waktu</th><th>Barang</th><th>Jenis</th><th>Harga lama</th><th>Harga baru</th><th>Perubahan</th><th>Diubah oleh</th><th>Catatan</th></tr>${sl.map(h=>{const x=pctV(h.o,h.nw),good=h.k=='Harga jual'?x>0:x<0;return `<tr><td>${dt(h.t)}</td><td>${esc(h.n)}</td><td>${h.k}</td><td>${rp(h.o)}</td><td><b>${rp(h.nw)}</b></td><td style="color:var(${x==null||x===0?'--mut':good?'--ok':'--er'})">${pctS(x)}</td><td>${esc(h.u||'')}</td><td>${esc(h.note||'')}</td></tr>`}).join('')||'<tr><td colspan="8" class="mut">Belum ada perubahan harga yang tercatat.</td></tr>'}</table>`+pager(rows.length,PN.ph,'phPg',SZ)}
+
 function phPg(d){PN.ph+=d;$('#pht').innerHTML=phTblH()}
 function phSearch(v){PHQ=v;PN.ph=0;$('#pht').innerHTML=phTblH()}
 
@@ -575,7 +535,7 @@ function dash(){
 <div class="card sc"><b>Transaksi terakhir</b><table><tr><th>Waktu</th><th>No. transaksi</th>${many?'<th>Cabang</th>':''}<th>Barang</th><th>Total</th><th>Status</th></tr>${last.map(x=>`<tr><td>${dt(x.t)}</td><td>${x.id}</td>${many?`<td>${esc(lname(x.l))}</td>`:''}<td style="white-space:normal;min-width:180px">${itemTxt(x)}</td><td><b>${rp(x.net)}</b></td><td><span class="badge ${ok(x)?'o':'v'}">${x.status}</span></td></tr>`).join('')||`<tr><td colspan="6" class="mut">Belum ada transaksi.</td></tr>`}</table><p style="margin:10px 0 0"><button class="btn g s" onclick="go('rep')">Lihat semua di Laporan</button></p></div>`}
 
 /* ===== PENGATURAN: SATU HAL, SATU TEMPAT ===== */
-function set(){const T=okTab('set',setTabs);return tabsH('set',setTabs)+(T=='min'?minTab():T=='cabang'?locCard():T=='akun'?userCard():T=='riwayat'?audCard():T=='hapus'?wipeCard():umumCard())}
+function set(){const T=okTab('set',setTabs);return tabsH('set',setTabs)+(T=='min'?minTab():T=='cabang'?locCard():T=='akun'?(refreshUsers(),userCard()):T=='riwayat'?audCard():T=='hapus'?wipeCard():umumCard())}
 const umumCard=()=>`<div class="card"><b>Aturan kasir</b><div class="f"><div><label for="sl">Batas diskon kasir (%)</label><input id="sl" type="number" min="0" max="100" value="${D.set.lim}" onchange="setLim(this.value,this)"><p class="mut" style="margin:4px 0 0">Kasir hanya boleh memberi diskon sampai persen ini. Owner bebas.</p></div><div><label for="sn">Boleh jual saat stok 0?</label><select id="sn" onchange="setNeg(this.value,this)"><option value="0">Tidak (disarankan)</option><option value="1" ${D.set.neg?'selected':''}>Ya</option></select><p class="mut" style="margin:4px 0 0">Kalau Ya, kasir tetap bisa menjual walau stok di sistem sudah habis.</p></div></div></div>`;
 let MQ='';
 function minTblH(){const qq=MQ.toLowerCase(),rows=D.ing.filter(i=>!qq||i.n.toLowerCase().includes(qq));
@@ -592,7 +552,7 @@ function locCard(){return `<div class="card"><b>Cabang</b><div class="f"><div><l
 function userCard(){return `<div class="card sc"><b>Akun pengguna</b><p class="mut">Login memakai email. Kalau staf tidak punya email, gunakan satu email Anda dengan tambahan nama, misalnya abuiqbal+kasir1@gmail.com. Semua tetap masuk ke kotak masuk yang sama.</p><div class="f"><div><label for="an">Nama</label><input id="an"></div><div><label for="au">Email</label><input id="au" type="email" autocomplete="off"></div><div><label for="ap">Kata sandi (min. 6)</label><input id="ap" type="password" autocomplete="new-password"></div><div><label for="ar">Peran</label><select id="ar"><option value="staff">Staff / Kasir</option><option value="owner">Owner</option></select></div></div><p id="lcf"><label>Cabang yang boleh diakses (untuk staff)</label>${lchk()}</p><button class="btn" onclick="addUser()">Tambah akun</button><div id="aerr" class="err"></div>
 <table style="margin-top:12px"><tr><th>Nama</th><th>Email</th><th>Peran</th><th>Cabang</th><th></th></tr>${D.users.map(x=>`<tr><td>${esc(x.n)}</td><td>${esc(x.u)}</td><td>${x.role=='owner'?'Owner':'Staff'}</td><td>${x.role=='owner'?'Semua':x.locs.map(l=>esc(lname(l))).join(', ')||'<span class="badge v">Belum ada</span>'}</td><td>${x.role=='staff'?`<button class="btn g s" onclick="editLocs('${x.id}')">Atur cabang</button> `:''}<button class="btn g s" onclick="resetPw('${x.id}')">Reset sandi</button>${x.id!=U.id?` <button class="btn r s" onclick="delUser('${x.id}')">Hapus</button>`:''}</td></tr>`).join('')}</table></div>`}
 function brgDaftar(){return `${owner()?`<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" onclick="go('inp')">+ Tambah barang baru</button><button class="btn g" onclick="copyP()">Salin produk ke cabang lain</button><span class="mut">Harga modal (HPP) berlaku untuk semua cabang.</span></div>`:''}<div class="card noprint"><label for="pq">Cari produk (${nf(D.prod.length)} produk)</label><input id="pq" value="${esc(PQ)}" oninput="prodSearch(this.value)" placeholder="Ketik nama produk"></div><div class="card sc" id="prt">${prodTblH()}</div>`}
-function brgHarga(){return `<div class="card noprint"><b>Riwayat perubahan harga</b><input id="phq" value="${esc(PHQ)}" oninput="phSearch(this.value)" placeholder="Cari nama barang" style="margin-top:8px"></div><div class="card sc" id="pht">${phTblH()}</div>`}
+
 
 /* ===== TAMBAH STOK: ISI STOK AKHIR (hasil akhir) ===== */
 let STMODE='final';
@@ -611,11 +571,96 @@ async function addStock(){const l=V('sc2'),i=V('si'),x=N('sq'),cost=V('sm')!==''
   const note=V('sn').trim();
   try{
     if(STMODE=='final'){
-      try{await rpc('stock_in_final',{p_loc:l,p_item:i,p_final:x,p_reason:note,p_cost:cost})}
-      catch(err){if(/could not find the function|schema cache|does not exist|PGRST202/i.test((err.message||'')+(err.code||''))){await rpc('stock_in',{p_loc:l,p_item:i,p_qty:x-cur,p_reason:note,p_cost:cost})}else throw err}
+      try{if(sifMissing)throw Object.assign(new Error('PGRST202 stock_in_final'),{code:'PGRST202'});await rpc('stock_in_final',{p_loc:l,p_item:i,p_final:x,p_reason:note,p_cost:cost})}
+      catch(err){if(/could not find the function|schema cache|does not exist|PGRST202/i.test((err.message||'')+(err.code||''))){sifMissing=true;await rpc('stock_in',{p_loc:l,p_item:i,p_qty:x-cur,p_reason:note,p_cost:cost})}else throw err}
     }else await rpc('stock_in',{p_loc:l,p_item:i,p_qty:x,p_reason:note,p_cost:cost});
-    await sync(['catalog','stock','hist'],[l]);toast('Stok '+I.n+' sekarang '+nq(bal(l,i))+' '+I.u)}
+    if(cost!=null)phVer=null;await sync(['catalog','stock','hist'],[l]);toast('Stok '+I.n+' sekarang '+nq(bal(l,i))+' '+I.u)}
   catch(err){fail('se2',err)}}
+
+/* ===== PERMINTAAN HEMAT KE SUPABASE API ===== */
+let phMissing=false,phVer=null,usersAt=0,quietBusy=false,sifMissing=false,spMissing=false;
+const isMissingFn=e=>/could not find the function|schema cache|does not exist|PGRST202/i.test(((e&&e.message)||'')+((e&&e.code)||''));
+async function getVer(){if(verMissing)return null;
+  try{return await rpc('data_version')}
+  catch(e){if(isMissingFn(e)){verMissing=true;return null}return false}}
+async function loadMark(parts,sl){const v=await getVer();await loadAll(parts,sl);if(typeof v==='string')lastVer=v}
+async function doLoad(parts,sl){
+  const all=!parts||parts==='all',has=x=>all||parts.includes(x),N={},jobs=[],own=U?owner():true;
+  const lim=async(t,col,n)=>{const r=await sb.from(t).select('*').order(col,{ascending:false}).limit(n);if(r.error)throw r.error;return r.data||[]};
+  if(has('core'))jobs.push((async()=>{
+    const[lo,se,sh]=await Promise.all([fetchAll('locations',[['created_at']]),fetchAll('settings',[]),lim('shifts','opened_at',500)]);
+    N.loc=lo.map(l=>({id:l.id,n:l.name}));
+    N.set=se[0]?{lim:+se[0].disc_limit,neg:se[0].allow_negative?1:0}:D.set;
+    N.shifts=sh.map(s=>({id:s.id,l:s.loc_id,o:+new Date(s.opened_at),a:+s.opening_cash,u:s.opened_by,c:s.closed_at?+new Date(s.closed_at):null,f:s.counted==null?null:+s.counted,e:s.expected==null?null:+s.expected,sl:s.sales_cash==null?null:+s.sales_cash,x:s.expenses==null?null:+s.expenses,n:s.note||''}))})());
+  if(has('users')&&own)jobs.push((async()=>{
+    const pf=await fetchAll('profiles',[['name'],['id']]);
+    N.users=pf.map(p=>({id:p.id,u:p.email,n:p.name,role:p.role,locs:p.locs||[]}))})());
+  if(has('catalog'))jobs.push((async()=>{
+    const[it,co,pr]=await Promise.all([fetchAll('items',[['name'],['id']]),own?fetchAll('item_costs',[['item_id']]):Promise.resolve([]),fetchAll('products',[['name'],['id']])]);
+    const cost={};co.forEach(c=>{cost[c.item_id]=+c.cost});
+    N.ing=it.map(i=>({id:i.id,n:i.name,u:i.unit,min:+i.min,c:cost[i.id]||0}));
+    N.prod=pr.map(p=>({id:p.id,n:p.name,cat:p.cat,b:p.item_id,on:p.active?1:0,u:p.unit,ppm:+p.price,locs:p.locs||[]}))})());
+  if(has('stock'))jobs.push((async()=>{
+    if(Array.isArray(sl)){const part={};for(const l of sl){const rows=await fetchAll('stock',[['item_id']],r=>r.eq('loc_id',l));const m={};rows.forEach(s=>{m[s.item_id]=+s.qty});part[l]=m}N.balPart=part}
+    else{const rows=await fetchAll('stock',[['loc_id'],['item_id']]),b={};rows.forEach(s=>{(b[s.loc_id]=b[s.loc_id]||{})[s.item_id]=+s.qty});N.bal=b}})());
+  if(has('hist'))jobs.push((async()=>{
+    const[mo,ex,sa,tr,au]=await Promise.all([lim('movements','t',1000),lim('expenses','t',1000),own?lim('sales','t',1000):[],own?lim('transfers','t',300):[],own?lim('audit','t',100):[]]);
+    N.mv=mo.map(m=>({t:+new Date(m.t),l:m.loc_id,i:m.item_id,q:+m.qty,type:m.type,reason:m.reason||'',u:m.user_name,ref:m.ref||''}));
+    N.sales=sa.map(mapSale);
+    N.tr=tr.map(t=>({id:t.id,t:+new Date(t.t),f:t.from_loc,to:t.to_loc,i:t.item_id,q:+t.qty,st:t.status}));
+    N.exp=ex.map(e=>({t:+new Date(e.t),d:e.d,l:e.loc_id,c:e.cat,a:+e.amount,n:e.note,u:e.user_name}));
+    N.aud=au.map(a=>({t:+new Date(a.t),u:a.user_name,a:a.action,o:a.object||'',r:a.reason||''}))})());
+  await Promise.all(jobs);
+  if(N.loc){D.loc=N.loc;D.set=N.set;D.shifts=N.shifts}
+  if(N.users)D.users=N.users;
+  if(N.ing){D.ing=N.ing;D.prod=N.prod;reindex()}
+  if(N.bal)D.bal=N.bal;
+  if(N.balPart)Object.assign(D.bal,N.balPart);
+  if(N.mv){D.mv=N.mv;D.sales=N.sales;D.tr=N.tr;D.exp=N.exp;D.aud=N.aud}
+  if(U&&D.loc.length&&!D.loc.some(l=>l.id==loc)){const ls=myLocs();if(ls.length)loc=ls[0].id}
+}
+async function enter(session){
+  await loadAll(['core','users']);
+  const p=D.users.find(x=>x.id===session.user.id);
+  if(!p){try{await sb.auth.signOut()}catch(e){}D=emptyD();throw new Error('Akun ini belum didaftarkan oleh owner. Hubungi owner.')}
+  U={id:p.id,u:p.u,n:p.n,role:p.role,locs:p.locs};
+  const ls=myLocs();
+  if(!ls.length){try{await sb.auth.signOut()}catch(e){}U=null;D=emptyD();throw new Error('Akun belum ditugaskan ke cabang mana pun. Hubungi owner.')}
+  loc=ls[0].id;pg=owner()?'dash':'pos';
+  try{await loadMark(['catalog','stock','hist'])}catch(e){U=null;D=emptyD();throw e}
+  shell();startSync();
+}
+async function quiet(){
+  if(!U||pending>0||document.hidden||quietBusy)return;
+  if(Date.now()-idleSince>10*60*1000)return;
+  quietBusy=true;
+  try{
+    tick++;const v=await getVer();let parts=['core','hist','stock'],sl=[loc];
+    if(v===false)return;
+    if(typeof v==='string'){if(v===lastVer)return;const cat=v.split('|')[1],old=lastVer==null?null:lastVer.split('|')[1];if(cat!==old)parts=['core','hist','stock','catalog']}
+    else{if(tick%4!=0)return;if(tick%12==0){parts='all';sl=null}}
+    const s0=dsig();
+    try{await loadAll(parts,sl);if(typeof v==='string')lastVer=v}catch(e){if(/JWT|token|auth/i.test((e&&e.message)||''))logout();return}
+    if(dsig()===s0)return;
+    const a=document.activeElement,typing=a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName);
+    if(U&&!$('#mo')&&!typing&&['dash','brg','stok','rep'].includes(pg))renderKeep();
+  }finally{quietBusy=false}}
+function refreshUsers(){if(!U||!owner()||Date.now()-usersAt<60000)return;usersAt=Date.now();
+  loadAll(['users']).then(()=>{if(pg=='set'&&TAB.set=='akun'&&!$('#mo')){const a=document.activeElement;if(!(a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName)))renderKeep()}}).catch(()=>{})}
+/* riwayat harga: hanya diminta saat dibuka, dan tidak diulang kalau tabelnya tidak ada */
+async function loadPH(){
+  const r=await sb.from('price_history').select('*').order('t',{ascending:false}).limit(300);
+  if(r.error){if(r.status===404||/PGRST205|42P01|not find the table|does not exist/i.test((r.error.message||'')+(r.error.code||'')))phMissing=true;return false}
+  D.ph=(r.data||[]).map(h=>({t:+new Date(h.t),pid:h.product_id,n:h.product_name,k:h.kind,o:+h.old_value,nw:+h.new_value,u:h.user_name,note:h.note||''}));
+  phVer=lastVer||'-';return true}
+function phEnsure(){if(!U||!owner()||phMissing)return;if(phVer!==null&&phVer===(lastVer||'-'))return;
+  loadPH().then(()=>{const el=$('#pht');if(el)el.innerHTML=phTblH();const m=$('#phm');if(m&&m.dataset.pid)m.innerHTML=phModalH(m.dataset.pid)}).catch(()=>{})}
+function phModalH(id){if(phMissing)return '';const hist=D.ph.filter(h=>h.pid==id).slice(0,5);
+  return hist.length?`<hr style="border:0;border-top:1px solid var(--ln);margin:16px 0"><b>Riwayat harga barang ini</b><table style="margin-top:6px">${hist.map(h=>`<tr><td>${dt(h.t)}</td><td>${h.k}</td><td>${rp(h.o)} → ${rp(h.nw)}</td></tr>`).join('')}</table>`:''}
+function brgHarga(){phEnsure();return `<div class="card noprint"><b>Riwayat perubahan harga</b><input id="phq" value="${esc(PHQ)}" oninput="phSearch(this.value)" placeholder="Cari nama barang" style="margin-top:8px"></div><div class="card sc" id="pht">${phTblH()}</div>`}
+function phTblH(){const qq=PHQ.toLowerCase(),rows=D.ph.filter(h=>!qq||h.n.toLowerCase().includes(qq)),SZ=20,pages=Math.max(1,Math.ceil(rows.length/SZ));if(PN.ph>=pages)PN.ph=pages-1;if(PN.ph<0)PN.ph=0;const sl=rows.slice(PN.ph*SZ,PN.ph*SZ+SZ);
+  const empty=phMissing?'Riwayat harga belum aktif di database Anda. Jalankan file supabase-patch-harga.sql di Supabase SQL Editor (aman, tidak menghapus data), lalu muat ulang halaman.':phVer===null?'Memuat riwayat harga…':'Belum ada perubahan harga yang tercatat.';
+  return `<table><tr><th>Waktu</th><th>Barang</th><th>Jenis</th><th>Harga lama</th><th>Harga baru</th><th>Perubahan</th><th>Diubah oleh</th><th>Catatan</th></tr>${sl.map(h=>{const x=pctV(h.o,h.nw),good=h.k=='Harga jual'?x>0:x<0;return `<tr><td>${dt(h.t)}</td><td>${esc(h.n)}</td><td>${h.k}</td><td>${rp(h.o)}</td><td><b>${rp(h.nw)}</b></td><td style="color:var(${x==null||x===0?'--mut':good?'--ok':'--er'})">${pctS(x)}</td><td>${esc(h.u||'')}</td><td>${esc(h.note||'')}</td></tr>`}).join('')||`<tr><td colspan="8" class="mut">${empty}</td></tr>`}</table>`+pager(rows.length,PN.ph,'phPg',SZ)}
 
 boot();
 </script></body></html>
