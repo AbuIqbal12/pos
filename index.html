@@ -120,7 +120,7 @@ async function doLogin(){const e=V('lu').trim().toLowerCase(),p=V('lp'),m=t=>{$(
   try{const{data,error}=await sb.auth.signInWithPassword({email:e,password:p});if(error){m(/not confirmed/i.test(error.message)?idErr(error.message):'Email atau kata sandi salah.');return}
     await enter(data.session)}catch(x){m(x.message||'Gagal masuk.')}}
 async function logout(){stopSync();phMissing=false;phVer=null;usersAt=0;lastVer=null;try{await sb.auth.signOut()}catch(e){}U=null;D=emptyD();cart=[];login()}
-function shell(){$('#root').innerHTML=`<div class="app"><nav><h1>Abu <span>Iqbal</span></h1>${LOGO.replace('class="lg"','class="lgn"')}${NAV.filter(n=>!n[2]||owner()).map(n=>`<button class="${pg==n[0]?'on':''}" onclick="navTo('${n[0]}')">${n[1]}</button>`).join('')}<button style="margin-top:auto" onclick="logout()">Keluar (${esc(U.n)})</button></nav><main id="pg"></main></div>`;render()}
+function shell(){$('#root').innerHTML=`<div class="app"><nav><h1>Abu <span>Iqbal</span></h1>${LOGO.replace('class="lg"','class="lgn"')}${NAV.filter(n=>!n[2]||owner()).map(n=>`<button class="${pg==n[0]?'on':''}" onclick="navTo('${n[0]}')">${n[1]}</button>`).join('')}<button style="margin-top:auto" onclick="logout()">Keluar (${esc(U.n)})</button></nav><main id="pg"></main></div>`;render();if(owner())abLoad(true)}
 
 /* ===== KASIR & KAS TOKO ===== */
 async function openSh(){const a=N('oc');if(V('oc')===''||a<0)return $('#oce').textContent='Isi uang awal (boleh 0).';
@@ -239,7 +239,7 @@ function fm(e){const d=e.value.replace(/\D/g,'');e.value=d?nf(+d):''}
 
 
 
-const NAV=[['dash','Dashboard',1],['pos','Kasir'],['brg','Barang'],['stok','Stok'],['exp','Pengeluaran'],['rep','Laporan',1],['set','Pengaturan',1]];
+const NAV=[['dash','Dashboard',1],['pos','Kasir'],['brg','Barang'],['stok','Stok'],['exp','Pengeluaran'],['tdk','Tidak Hadir'],['rep','Laporan',1],['set','Pengaturan',1]];
 
 
 function lsel(all){return `<select aria-label="Lokasi" style="width:auto" onchange="${all?"R.l=this.value":"loc=this.value"};render()">${all?`<option value="all">Semua lokasi</option>`:''}${(all?D.loc:myLocs()).map(l=>`<option value="${l.id}" ${(all?R.l:loc)==l.id?'selected':''}>${l.n}</option>`).join('')}</select>`}
@@ -519,7 +519,7 @@ const setTabs=[['umum','Umum'],['min','Stok Minimum'],['cabang','Cabang'],['akun
 function brg(){const T=okTab('brg',brgTabs);return tabsH('brg',brgTabs)+(T=='tambah'?brgTambah():T=='impor'?impCard():T=='harga'?brgHarga():brgDaftar())}
 function stok(){const T=okTab('stok',stokTabs);return tabsH('stok',stokTabs)+(T=='masuk'?stokMasuk():T=='koreksi'?inv():T=='transfer'?tr():stk())}
 function render(){const t=NAV.find(n=>n[0]==pg)[1],sl=pg=='pos'||pg=='exp'||(pg=='brg'&&TAB.brg=='daftar')||(pg=='stok'&&['koreksi','masuk','transfer'].includes(TAB.stok));
-  $('#pg').innerHTML=`<div class="top"><h2>${t}</h2>${sl?lsel(false):''}</div>`+({dash,pos,brg,stok,exp,rep,set})[pg]();if(pg=='stok'&&TAB.stok=='terakhir')stkTable();if(pg=='stok'&&TAB.stok=='masuk')refillShow();save()}
+  $('#pg').innerHTML=`<div class="top"><h2>${t}</h2>${sl?lsel(false):''}</div>`+({dash,pos,brg,stok,exp,tdk,rep,set})[pg]();if(pg=='stok'&&TAB.stok=='terakhir')stkTable();if(pg=='stok'&&TAB.stok=='masuk')refillShow();save()}
 
 /* ===== DASHBOARD SEDERHANA ===== */
 let DL='all';
@@ -649,7 +649,7 @@ async function loadAllLoc(){if(allLocBusy)return;allLocBusy=true;
     else D.allLoc=[...D.loc]}
   finally{allLocBusy=false}}
 function loadAllLocThen(){if(allLocBusy||D.allLoc.length)return;
-  loadAllLoc().then(()=>{if(pg=='stok'&&TAB.stok=='transfer'&&!$('#mo')){const a=document.activeElement;if(!(a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName)))renderKeep()}}).catch(()=>{})}
+  loadAllLoc().then(()=>{if(((pg=='stok'&&TAB.stok=='transfer')||(pg=='exp'&&TAB.exp=='catat')||pg=='tdk')&&!$('#mo')){const a=document.activeElement;if(!(a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName)))renderKeep()}}).catch(()=>{})}
 async function doLoad(parts,sl){
   const all=!parts||parts==='all',has=x=>all||parts.includes(x),N={},jobs=[],own=U?owner():true;
   const lim=async(t,col,n)=>{const r=await sb.from(t).select('*').order(col,{ascending:false}).limit(n);if(r.error)throw r.error;return r.data||[]};
@@ -708,8 +708,8 @@ function tr(){
 const expTabs=[['catat','Catat Pengeluaran'],['gaji','Gaji & Bon Karyawan',1]];
 function exp(){const T=okTab('exp',expTabs);return tabsH('exp',expTabs)+(T=='gaji'?gajiTab():catatTab())}
 const empOpts=()=>D.emps.filter(e=>e.on).map(e=>`<option value="${e.id}">${esc(e.n)}${owner()&&e.loc?' ('+esc(lname(e.loc))+')':''}</option>`).join('');
-function catatTab(){const own=owner();
-  return `<div class="card"><b>Catat pengeluaran — ${esc(lname(loc))}</b><div class="f"><div><label for="ec">Kategori</label><select id="ec" onchange="expCat()">${own?'<option value="Gaji">Gaji</option>':''}<option value="Bon">Bon</option><option value="Lainnya" selected>Lainnya</option></select></div><div id="ewr" style="display:none"><label for="eemp">Karyawan</label><select id="eemp" onchange="expCat()"><option value="">— pilih karyawan —</option>${empOpts()}</select></div><div><label for="ea">Nominal</label><input id="ea" class="rp" type="text" inputmode="numeric" oninput="fm(this)"></div><div><label for="ed">Tanggal</label><input id="ed" type="date" value="${ld()}" onchange="expCat()"></div><div><label for="en" id="enl">Alasan (wajib)</label><input id="en" placeholder="mis. beli plastik pembungkus"></div><button class="btn" onclick="doExp()">Simpan</button></div><p id="esh" class="mut" style="margin:8px 0 0"></p><div id="ee" class="err"></div></div>
+function catatTab(){const own=owner(),eL=own?D.loc:(D.allLoc.length?D.allLoc:myLocs());if(!own&&!D.allLoc.length)loadAllLocThen();
+  return `<div class="card"><b>Catat pengeluaran</b><div class="f"><div><label for="eloc">Toko</label><select id="eloc">${eL.map(l=>`<option value="${l.id}" ${l.id==loc?'selected':''}>${esc(l.n)}</option>`).join('')}</select></div><div><label for="ec">Kategori</label><select id="ec" onchange="expCat()">${own?'<option value="Gaji">Gaji</option>':''}<option value="Bon">Bon</option><option value="Lainnya" selected>Lainnya</option></select></div><div id="ewr" style="display:none"><label for="eemp">Karyawan</label><select id="eemp" onchange="expCat()"><option value="">— pilih karyawan —</option>${empOpts()}</select></div><div><label for="ea">Nominal</label><input id="ea" class="rp" type="text" inputmode="numeric" oninput="fm(this)"></div><div><label for="ed">Tanggal</label><input id="ed" type="date" value="${ld()}" onchange="expCat()"></div><div><label for="en" id="enl">Alasan (wajib)</label><input id="en" placeholder="mis. beli plastik pembungkus"></div><button class="btn" onclick="doExp()">Simpan</button></div><p id="esh" class="mut" style="margin:8px 0 0"></p><div id="ee" class="err"></div></div>
 <div class="card sc"><table><tr><th>Tanggal</th><th>Cabang</th><th>Kategori</th><th>Karyawan</th><th>Nominal</th><th>Catatan</th><th>Dicatat oleh</th><th>Status</th><th></th></tr>${D.exp.filter(e=>own||e.u==U.n).slice(0,50).map(e=>`<tr class="${eok(e)?'':'xv'}"><td>${e.d}</td><td>${esc(lname(e.l))}</td><td>${esc(e.c)}</td><td>${esc(e.emp||'-')}</td><td class="amt">${rp(e.a)}</td><td>${esc(e.n)}</td><td>${esc(e.u||'-')}</td><td>${eok(e)?'<span class="badge o">Tercatat</span>':`<span class="badge v">Batal</span><div class="mut" style="font-size:12px;white-space:normal;max-width:220px">${esc(e.vr)}${e.vb?' • oleh '+esc(e.vb):''}</div>`}</td><td>${eok(e)&&canVoidExp(e)?`<button class="btn r s" onclick="voidExp(${e.id})">Batalkan</button>`:''}</td></tr>`).join('')||'<tr><td colspan="9" class="mut">Belum ada pengeluaran.</td></tr>'}</table></div>`}
 function fillRest(x){const a=$('#ea');if(a)a.value=nf(Math.max(0,x))}
 function expCat(){const c=V('ec'),wr=$('#ewr'),sh=$('#esh');if(!wr)return;const emp=c=='Gaji'||c=='Bon';
@@ -722,9 +722,13 @@ async function doExp(){const a=N('ea'),c=V('ec'),emp=V('eemp')||null,note=V('en'
   if(needEmp&&!emp)return e('Pilih karyawan.');
   if(!needEmp&&!note)return e('Alasan pengeluaran wajib diisi.');
   try{
-    try{await rpc('add_expense',{p_loc:loc,p_d:V('ed'),p_cat:c,p_amount:a,p_note:note,p_employee:needEmp?emp:null})}
-    catch(x){if(isMissingFn(x)){if(needEmp)return e('Fitur Gaji dan Bon belum aktif. Minta owner menjalankan supabase-patch-staf-gaji.sql di Supabase SQL Editor.');
-        await rpc('add_expense',{p_loc:loc,p_d:V('ed'),p_cat:c,p_amount:a,p_note:note})}else throw x}
+    const el=V('eloc')||loc,args={p_loc:el,p_d:V('ed'),p_cat:c,p_amount:a,p_note:note,p_employee:needEmp?emp:null};
+    try{await rpc('add_expense_any',args)}
+    catch(x0){if(!/could not find the function|PGRST202/i.test((x0.message||'')+(x0.code||'')))throw x0;
+      if(!owner()&&!myLocs().some(l=>l.id==el))return e('Untuk mencatat di toko lain, minta owner menjalankan supabase-patch-pengeluaran-tidakhadir.sql di Supabase SQL Editor.');
+      try{await rpc('add_expense',args)}
+      catch(x){if(isMissingFn(x)){if(needEmp)return e('Fitur Gaji dan Bon belum aktif. Minta owner menjalankan supabase-patch-staf-gaji.sql di Supabase SQL Editor.');
+          await rpc('add_expense',{p_loc:el,p_d:V('ed'),p_cat:c,p_amount:a,p_note:note})}else throw x}}
     if(D.pay)D.pay.stale=true;
     await sync(['hist']);toast('Tersimpan')}
   catch(x){e(x.message)}}
@@ -839,6 +843,45 @@ async function saveProd(id){const p=D.prod.find(x=>x.id==id),n=V('en').trim(),c=
   catch(x){fail('ee',x)}finally{busy=0}}
 async function saveItemName(id){const i=ing(id),n=V('en').trim();if(!n)return $('#ee').textContent='Nama wajib diisi.';if(n===i.n)return closeM();
   try{await renameItem(id,n);aud('Ubah nama barang',i.n+' → '+n);closeM();await sync(['catalog']);toast('Nama diperbarui')}catch(x){fail('ee',x)}}
+
+/* ===== CATATAN KARYAWAN TIDAK HADIR ===== */
+let AB={rows:null,miss:false,busy:false,err:'',m:ld().slice(0,7)};
+const abKinds=['Alpha','Izin','Sakit','Cuti'];
+const fDa=d=>{try{return new Date(d+'T00:00:00').toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short',year:'numeric'})}catch(x){return d}};
+async function abLoad(force){if(AB.miss||AB.busy||!U)return;if(AB.rows&&!force)return;AB.busy=true;
+  try{const r=await sb.from('absences').select('*').order('abs_date',{ascending:false}).limit(1500);
+    if(r.error){if(/absences|schema cache|does not exist/i.test(r.error.message||''))AB.miss=true;else throw r.error}
+    else{AB.err='';AB.rows=(r.data||[]).map(x=>({id:x.id,eid:x.emp_id,n:x.emp_name,l:String(x.loc_id||''),ln:x.loc_name||'',d:x.abs_date,k:x.kind,note:x.note||'',by:x.created_by||'',uid:x.created_by_id||'',ca:+new Date(x.created_at),st:x.status,vr:x.void_reason||'',vb:x.void_by||''}))}}
+  catch(x){AB.err=x.message||String(x)}
+  finally{AB.busy=false}
+  if(pg=='tdk'){if(AB.miss)renderKeep();else{const el=$('#abl');if(el)el.innerHTML=abListH()}}}
+function tdk(){if(!AB.rows&&!AB.miss)abLoad();
+  if(AB.miss)return `<div class="card" style="border-color:var(--er)"><b>Fitur Tidak Hadir belum aktif</b><p class="mut">Jalankan file supabase-patch-pengeluaran-tidakhadir.sql di Supabase (SQL Editor → New query → tempel → Run). Aman dan tidak menghapus data. Setelah itu muat ulang halaman.</p></div>`;
+  const own=owner(),eL=own?D.loc:(D.allLoc.length?D.allLoc:myLocs());if(!own&&!D.allLoc.length)loadAllLocThen();
+  const emps=D.emps.filter(e=>e.on).slice().sort((a,b)=>a.n.localeCompare(b.n,'id'));
+  return `<div class="card noprint"><b>Catat karyawan tidak hadir</b><p class="mut">Catat siapa yang tidak masuk kerja, tanggalnya, dan alasannya. Ini hanya catatan, tidak mengubah gaji otomatis.</p><div class="f"><div><label for="abe">Karyawan</label><select id="abe"><option value="">— pilih karyawan —</option>${emps.map(e=>`<option value="${e.id}">${esc(e.n)}</option>`).join('')}</select></div><div><label for="abd">Tanggal</label><input id="abd" type="date" value="${ld()}"></div><div><label for="abk">Keterangan</label><select id="abk">${abKinds.map(k=>`<option>${k}</option>`).join('')}</select></div><div><label for="abl1">Toko</label><select id="abl1">${eL.map(l=>`<option value="${l.id}" ${l.id==loc?'selected':''}>${esc(l.n)}</option>`).join('')}</select></div><div><label for="abn">Catatan (boleh dikosongkan)</label><input id="abn" maxlength="200" placeholder="mis. sakit demam, tanpa kabar"></div><button class="btn" onclick="addAbs()">Simpan</button></div><div id="abe2" class="err"></div></div><div id="abl">${abListH()}</div>`}
+async function addAbs(){const e=V('abe'),d=V('abd'),m=t=>{$('#abe2').textContent=t};
+  if(!e)return m('Pilih karyawan.');if(!d)return m('Tanggal wajib diisi.');if(busy)return;busy=1;
+  try{await rpc('add_absence',{p_emp:e,p_date:d,p_kind:V('abk'),p_note:V('abn').trim()||null,p_loc:V('abl1')||loc});m('');$('#abn').value='';toast('Tercatat');await abLoad(true)}
+  catch(x){if(/could not find the function|PGRST202/i.test((x.message||'')+(x.code||''))){AB.miss=true;renderKeep()}else m(x.message)}
+  finally{busy=0}}
+function abMonth(v){if(!/^\d{4}-\d{2}$/.test(v))return;AB.m=v;$('#abl').innerHTML=abListH()}
+const abCan=x=>x.st==='Tercatat'&&(owner()||(x.uid===U.id&&dayOf(x.ca)===ld()));
+function abListH(){
+  if(AB.err&&!AB.rows)return `<div class="card"><p class="err">${esc(AB.err)}</p><button class="btn g" onclick="AB.err='';abLoad(true)">Coba lagi</button></div>`;
+  if(!AB.rows)return '<div class="card"><p class="mut">Memuat…</p></div>';
+  const own=owner(),m=AB.m,inM=AB.rows.filter(x=>x.d.slice(0,7)===m);
+  const mon=`<div class="card noprint"><div class="f"><div><label for="abm">Bulan</label><input id="abm" type="month" value="${m}" onchange="abMonth(this.value)"></div></div></div>`;
+  const rowH=x=>`<tr class="${x.st==='Tercatat'?'':'xv'}"><td>${fDa(x.d)}</td><td>${esc(x.n)}</td><td><span class="badge ${x.k==='Alpha'?'v':x.k==='Sakit'?'n':''}">${esc(x.k)}</span></td><td>${esc(x.ln||lname(x.l))}</td><td style="white-space:normal;min-width:140px">${esc(x.note)}${x.st==='Tercatat'?'':` <span class="badge v">Batal</span><div class="mut" style="font-size:12px">${esc(x.vr)}${x.vb?' • oleh '+esc(x.vb):''}</div>`}</td><td>${esc(x.by)}</td><td>${abCan(x)?`<button class="btn r s" onclick="voidAbs(${x.id})">Batalkan</button>`:''}</td></tr>`;
+  let sumH='';
+  if(own){const sum={};inM.filter(x=>x.st==='Tercatat').forEach(x=>{const o=sum[x.n]||(sum[x.n]={Alpha:0,Izin:0,Sakit:0,Cuti:0});o[x.k]++});
+    const names=Object.keys(sum).sort((a,b)=>a.localeCompare(b,'id'));
+    sumH=`<div class="card sc"><b>Rekap tidak hadir — ${m}</b><table><tr><th>Karyawan</th><th>Alpha</th><th>Izin</th><th>Sakit</th><th>Cuti</th><th>Total</th></tr>${names.map(n=>{const o=sum[n];return `<tr><td>${esc(n)}</td><td>${o.Alpha}</td><td>${o.Izin}</td><td>${o.Sakit}</td><td>${o.Cuti}</td><td><b>${o.Alpha+o.Izin+o.Sakit+o.Cuti}</b> hari</td></tr>`}).join('')||'<tr><td colspan="6" class="mut">Tidak ada yang tercatat tidak hadir bulan ini.</td></tr>'}</table></div>`}
+  return mon+sumH+`<div class="card sc"><b>${own?'Riwayat':'Catatan saya'} — ${m}</b><table><tr><th>Tanggal</th><th>Karyawan</th><th>Keterangan</th><th>Toko</th><th>Catatan</th><th>Dicatat oleh</th><th></th></tr>${inM.map(rowH).join('')||'<tr><td colspan="7" class="mut">Belum ada catatan di bulan ini.</td></tr>'}</table></div>`}
+function voidAbs(id){const x=AB.rows&&AB.rows.find(r=>r.id==id);if(!x)return;
+  modal(`<h3>Batalkan catatan?</h3><p>${esc(x.n)} • ${fDa(x.d)} • ${esc(x.k)}</p><label for="avr">Alasan (wajib)</label><input id="avr" maxlength="200"><div id="ave" class="err"></div><br><button class="btn r" onclick="doVoidAbs(${id})">Batalkan catatan</button> <button class="btn g" onclick="closeM()">Kembali</button>`)}
+async function doVoidAbs(id){const r=V('avr').trim();if(!r)return $('#ave').textContent='Alasan wajib diisi.';
+  try{await rpc('void_absence',{p_id:id,p_reason:r});closeM();toast('Catatan dibatalkan');await abLoad(true)}catch(x){fail('ave',x)}}
 
 boot();
 </script></body></html>
