@@ -778,9 +778,10 @@ const RFC={};
 async function refillLoad(l,i){const k=l+'|'+i;if(RFC[k])return RFC[k];
   const r=await sb.from('movements').select('*').eq('loc_id',l).eq('item_id',i).eq('type','Barang masuk').order('t',{ascending:false}).limit(5);
   if(r.error)throw r.error;
-  RFC[k]=(r.data||[]).map(m=>({t:+new Date(m.t),q:+m.qty,n:m.reason||'',u:m.user_name||'',st:m.status||'Selesai'})).filter(x=>x.st!=='Batal');return RFC[k]}
+  RFC[k]=(r.data||[]).map(m=>({l,i,t:+new Date(m.t),q:+m.qty,n:m.reason||'',u:m.user_name||'',st:m.status||'Selesai'})).filter(x=>x.st!=='Batal');return RFC[k]}
+const afterBal=(l,i,t)=>{let b=bal(l,i);for(const m of D.mv){if(m.l==l&&m.i==i&&m.t>t)b-=m.q}return Math.round(b*1000)/1000};
 function refillH(rows,u,ln){if(!rows.length)return `<p class="mut" style="margin:0">Barang ini belum pernah diisi di ${esc(ln)}.</p>`;const x=rows[0];
-  return `<div class="last">Isi stok terakhir di ${esc(ln)}: <b>+${nq(x.q)} ${u}</b> pada <b>${dt(x.t)}</b>${x.u?' oleh '+esc(x.u):''}${x.n?' • '+esc(x.n):''}</div>${rows.length>1?`<table><tr><th>Waktu</th><th>Diisi</th><th>Catatan</th><th>Oleh</th></tr>${rows.map(m=>`<tr><td>${dt(m.t)}</td><td>+${nq(m.q)} ${u}</td><td>${esc(m.n)}</td><td>${esc(m.u)}</td></tr>`).join('')}</table>`:''}`}
+  return `<div class="last">Isi stok terakhir di ${esc(ln)}: stok akhir jadi <b>${nq(afterBal(x.l,x.i,x.t))} ${u}</b> <span class="mut">(ditambah ${nq(x.q)} ${u})</span> pada <b>${dt(x.t)}</b>${x.u?' oleh '+esc(x.u):''}${x.n?' • '+esc(x.n):''}</div>${rows.length>1?`<table><tr><th>Waktu</th><th>Stok akhir</th><th>Ditambah</th><th>Catatan</th><th>Oleh</th></tr>${rows.map(m=>`<tr><td>${dt(m.t)}</td><td><b>${nq(afterBal(m.l,m.i,m.t))} ${u}</b></td><td>+${nq(m.q)} ${u}</td><td>${esc(m.n)}</td><td>${esc(m.u)}</td></tr>`).join('')}</table>`:''}`}
 function refillShow(){const el=$('#srf');if(!el)return;const i=V('si'),l=V('sc2');if(!i||!l){el.innerHTML='';return}
   const I=ing(i),ln=lname(l),k=l+'|'+i;
   if(RFC[k]){el.innerHTML=refillH(RFC[k],I.u,ln);return}
